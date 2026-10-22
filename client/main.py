@@ -105,7 +105,8 @@ class Clock(Block):
 
 def toposort(blocks: list[Block]):
     indeg = {b: sum(n is not None and n.source[0] is not b for n in b.inputs)
-                for b in blocks}
+                for b in blocks
+            }
     ready = [b for b, d in indeg.items() if d == 0]
     order = []
     while ready:
@@ -149,13 +150,10 @@ class Circuit:
         if wire.source is None:
             return
 
-        print(wire, i)
         dst, port = wire.destinations[i]
         wire.destinations.remove((dst, port))
-
         dst.inputs[port] = None
 
-        print(wire)
         self._order = None
 
     def _toposort(self) -> list[Block] | None:
