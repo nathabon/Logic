@@ -2,6 +2,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Callable
 from enum import Enum
+from collections import deque
 
 
 Bits = tuple[bool, ...]
@@ -13,6 +14,7 @@ class GateType:
     n_in: int
     n_out: int
     func: Callable[..., Bits]
+    delay: int = 1
 
 def clock(f: int):
     count = f
@@ -70,16 +72,26 @@ class Block:
         self.outputs = [Wire() for _ in range(kind.n_out)]
         for i, net in enumerate(self.outputs):
             net.source = (self, i)
+        self._pipe: deque[Bits] = deque([(False,) * kind.n_out] * (kind.delay - 1))
 
-    def evaluate(self) -> bool:
-        """Recompute outputs; return True if any output changed."""
-        vals = (input.value if input else False for input in self.inputs)
-        new = self.kind.func(*vals)
-        changed = False
-        for net, v in zip(self.outputs, new):
-            if net.value != v:
-                net.value, changed = v, True
-        return changed
+    @property
+    def n_in(self):
+        return self.kind.n_in
+
+    @property
+    def n_out(self):
+        return self.kind.n_out
+
+    @property
+    def values(self):
+        return [o.value for o in self.outputs]
+
+    def compute(self) -> Bits:
+        vals = [n.value if n else False for n in self.inputs]
+        self._pipe.append(self.kind.func(*vals))
+        return self._pipe.popleft()
+
+    
 
 
 class Source(Block):
@@ -92,8 +104,8 @@ class Source(Block):
     def set(self, v: bool) -> None:
         self.outputs[0].value = v
 
-    def evaluate(self) -> bool:
-        return False
+    def compute(self) -> Bits: 
+        return (self.outputs[0].value,)
 
 
 class Clock(Block):
@@ -103,39 +115,13 @@ class Clock(Block):
 
 
 
-def toposort(blocks: list[Block]):
-    indeg = {b: sum(n is not None and n.source[0] is not b for n in b.inputs)
-                for b in blocks
-            }
-    ready = [b for b, d in indeg.items() if d == 0]
-    order = []
-    while ready:
-        b = ready.pop()
-        order.append(b)
-        for net in b.outputs:
-            for sink, _ in net.destinations:
-                indeg[sink] -= 1
-                if indeg[sink] == 0:
-                    ready.append(sink)
-    return order if len(order) == len(blocks) else None
-
-
-# class BlockGroup(Block):
-#     def __init__(self, blocks: list[Block]) -> None:
-#         self.blocks = blocks
-#         self._order = toposort(blocks)
-#         # super().__init__(kind, name)
-
-
-
 class Circuit:
     def __init__(self) -> None:
         self.blocks: list[Block] = []
-        self._order: list[Block] | None = None
+        self.tick = 0
 
     def add(self, block: Block) -> Block:
         self.blocks.append(block)
-        self._order = None
         return block
 
     def connect(self, src: Block, src_port: int, dst: Block, dst_port: int):
@@ -144,7 +130,6 @@ class Circuit:
         net = src.outputs[src_port]
         dst.inputs[dst_port] = net
         net.destinations.append((dst, dst_port))
-        self._order = None
 
     def disconnect(self, wire: Wire, i: int):
         if wire.source is None:
@@ -154,21 +139,12 @@ class Circuit:
         wire.destinations.remove((dst, port))
         dst.inputs[port] = None
 
-        self._order = None
 
-    def _toposort(self) -> list[Block] | None:
-        return toposort(self.blocks)
-
-    def step(self, max_iter: int = 100):
-        if self._order is None:
-            self._order = self._toposort() or []
-        if self._order:                       # combinational: single pass
-            for b in self._order:
-                b.evaluate()
-        else:                                 # feedback: iterate to a fixed point
-            for _ in range(max_iter):
-                if not any([b.evaluate() for b in self.blocks]):
-                    return
-            raise RuntimeError("Circuit did not stabilise (oscillation?)")
+    def step(self) -> None:
+        results = [(b, b.compute()) for b in self.blocks]
+        for b, bits in results:
+            for net, v in zip(b.outputs, bits):
+                net.value = v
+        self.tick += 1
 
 

@@ -5,7 +5,7 @@
 
 /**
  * 
- * @param {Number[]} l 
+ * @param {number[]} l 
  * @returns 
  */
 function sum(l) {
@@ -17,29 +17,30 @@ class GateType {
 
     /** @type {string} */
     name;
-    /** @type {Number} */
+    /** @type {number} */
     n_in;
-    /** @type {Number} */
+    /** @type {number} */
     n_out;
     /** @type {(...inputs: boolean[]) => Bits} */
     func;
+    /** @type {number} */
+    delay;
 
     /**
      * @param {string} name
      * @param {number} n_in
      * @param {number} n_out
      * @param {(...inputs: boolean[]) => Bits} func
+     * @param {number} delay
      */
-    constructor(name, n_in, n_out, func) {
+    constructor(name, n_in, n_out, func, delay = 1) {
         this.name = name;
         this.n_in = n_in;
         this.n_out = n_out;
         this.func = func;
+        this.delay = delay
     }
 }
-
-
-
 
 
 // MARK: Wire
@@ -62,6 +63,16 @@ class Wire {
         this.source = source;
         this.destinations = destination;
     }
+
+    /**
+     * @returns {string}
+     */
+    toJson() {
+        return JSON.stringify({
+            'source': [this.source?.[0].id, this.source?.[1]],
+            'destinations': this.destinations.map((p) => ([p[0].id, p[1]]))
+        });
+    }
 }
 
 
@@ -72,19 +83,25 @@ class Block {
     kind;
     /** @type {string} */
     name;
+    /** @type {string} */
+    id;
     /** @type {(Wire | null)[]} */
     inputs;
     /** @type {Wire[]} */
     outputs;
+    /** @type {Bits[]} */
+    #pipe;
+    /** @type {number} */
+    #head = 0;
 
     /**
-     * 
      * @param {GateType} kind 
      * @param {string | null} name 
      */
     constructor(kind, name = null) {
         this.kind = kind;
         this.name = name ?? kind.name;
+
         this.inputs = new Array(kind.n_in).fill(null);
         this.outputs = new Array(kind.n_out)
         for (let i = 0; i < kind.n_out; i++) {
@@ -92,6 +109,9 @@ class Block {
             wire.source = [this, i];
             this.outputs[i] = wire;
         }
+
+        const zeros = Object.freeze(new Array(kind.n_out).fill(false));
+        this.#pipe = new Array(kind.delay - 1).fill(zeros);
     }
 
     get n_in() {
@@ -111,23 +131,29 @@ class Block {
     }
 
     /**
-     * Return true if an output has changed
-     * @returns {boolean}
+     * @returns {Bits}
      */
-    evaluate() {
-        const vals = this.inputs.map((wire) => (wire?.value ?? false));
-        const next = this.kind.func(...vals);
+    compute() {
+        var vals = this.inputs.map((i) => i?.value ?? false);
+        const next = this.func(...vals);
 
-        let changed = false;
-        const n = Math.min(this.outputs.length, next.length);
-        for (let i = 0; i < n; i++) {
-            const net = this.outputs[i];
-            if (net.value !== next[i]) {
-                net.value = next[i];
-                changed = true;
-            }
-        }
-        return changed;
+        const pipe = this.#pipe;
+        if (pipe.length === 0) return next; // delay == 1 -> pas de file
+
+        const out = pipe[this.#head];
+        pipe[this.#head] = next;
+        this.#head = (this.#head + 1) % pipe.length;
+        return out;
+    }
+
+    toJSON() {
+        return {
+            id: this.id,
+            name: this.name,
+            kind: this.kind.name,
+            pipe: this.#pipe,
+            head: this.#head
+        };
     }
 }
 
@@ -137,96 +163,82 @@ class Circuit {
 
     /** @type {Block[]} */
     blocks;
-    /** @type {Block[] | null} */
-    #order;
+    /** @type {number} */
+    tick;
 
     /**
-     * 
      * @param {Block[] | null} blocks 
-     * @param {Block[] | null} _order 
      */
-    constructor(blocks, _order = null) {
+    constructor(blocks) {
         this.blocks = blocks ?? [];
-        this.#order = _order;
+        this.tick = 0;
     }
 
     /**
-     * 
      * @param {Block} block 
      */
     add(block) {
+        const ids = this.blocks.filter((b) => b.kind.name == block.kind.name);
+        console.log(ids);
+        const idsN = ids.map((b) => Number(b.id.toLowerCase().replace(b.kind.name, '')));
+        console.log(idsN);
+        var id = Math.max(...idsN);
+        if (id == -Infinity) id = -1;
+        
+        block.id = block.kind.name + (id + 1);
+        console.log(block.id);
         this.blocks.push(block);
-        this.#order = null;
 
         return block;
     }
 
     /**
-     * 
      * @param {Block} src 
-     * @param {Number} src_port 
+     * @param {number} src_port 
      * @param {Block} dst 
-     * @param {Number} dst_port 
+     * @param {number} dst_port 
+     * @return {Wire}
      */
     connect(src, src_port, dst, dst_port) {
         if (dst.inputs[dst_port] != null) {
-            return;
+            return dst.inputs[dst_port];
         }
 
         var net = src.outputs[src_port];
         net.destinations.push([dst, dst_port]);
         dst.inputs[dst_port] = net;
-        this.#order = null;
-    }
 
-    toposort() {
-        /** @type {Map<Block, Number>} */
-        var indeg = new Map();
-        this.blocks.forEach(b => {
-            const count = b.inputs.filter((i) => (i != null && i.source != null && i.source[0] != b)).length;
-            indeg.set(b, count);
-        });
-        /** @type {Block[]} */
-        var ready = new Array();
-        for (const [b, d] of indeg.entries()) {
-            if (d == 0) ready.push(b);
-        }
-
-        var order = new Array();
-        while (ready.length != 0) {
-            var b = ready.pop();
-            if (b === undefined) continue;
-            order.push(b);
-            for (const net of b.outputs) {
-                for (const [sink, _] of net.destinations) {
-                    const count = indeg.get(sink);
-                    if (count === undefined) continue;
-                    indeg.set(sink, count - 1);
-                    if (count - 1 === 0) {
-                        ready.push(sink);
-                    }
-                }
-            }
-        }
-
-        if (order.length == this.blocks.length) return order;
-        return null;
+        return net;
     }
 
     /**
-     * 
-     * @param {Number} max_iter 
+     * @param {Wire} wire 
+     * @param {number} port 
      */
-    step(max_iter = 100) {
-        if (this.#order == null) this.#order = this.toposort();
-        if (this.#order != null) {
-            for (const b of this.#order) b.evaluate();
-        } else {
-            for (let _ = 0; _ < max_iter; _++) {
-                if (this.blocks.map((b) => b.evaluate()).find((b) => b) != undefined) return;
-            }
+    disconnect(wire, port) {
+        if (!wire.source) return
 
-            throw new Error("Looping in the circuit");
+        const [dst, _port] = wire.destinations[port];
+        const i = wire.destinations.indexOf([dst, _port]);
+        wire.destinations.slice(i, 1);
+        dst.inputs[_port] = null;
+    }   
+
+    step() {
+        /** @type {[Block, Bits][]} */
+        var results = this.blocks.map((b) => [b, b.compute()]);
+        for (const [b, bits] of results) {
+            for (let i = 0; i < bits.length; i++) {
+                const wire = b.outputs[i];
+                wire.value = bits[i];
+            }
         }
+        this.tick++;
+    }
+
+    toJSON() {
+        return {
+            blocks: this.blocks.map((b) => b.toJSON())
+        };
     }
 }
