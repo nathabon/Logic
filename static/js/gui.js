@@ -118,7 +118,9 @@ class BlockGUI {
     block;
     /** @type {Vec2} */
     pos;
-    /** @type {[number, number]} */
+    /** @type {[[number, number][], [number, number][]]} */
+    pinsPos;
+    /** @type {Vec2} */
     size;
     /** @type {number} */
     rotation;
@@ -134,13 +136,26 @@ class BlockGUI {
     constructor(block, pos = [0, 0], size = BlockGUI.DEFAULT_SIZE, rotation=0.0) {
         this.block = block;
         this.pos = new Vec2(...pos);
-        this.size = [...size];
+        this.size = new Vec2(...size);
         this.rotation = rotation;
         this.img = SpriteCache.get(
             `static/images/gates/${block.kind.name}.svg`,
             this.size[0],
             this.size[1],
         );
+        
+        console.log(this.kind, this.img, this.hasImg);
+        if (this.hasImg) this.pinsPos = BlockGUI.PINS_POSITION[this.kind];
+        else {
+            const dStart = 1 / (this.block.n_in + 1);
+            const dEnd = 1 / (this.block.n_out + 1);
+            const start = new Array(this.block.n_in);
+            for (let i = 1; i < this.block.n_in + 1; i++) start[i-1] = [0, i * dStart];
+            const end = new Array(this.block.n_out);
+            for (let i = 1; i < this.block.n_out + 1; i++) end[i-1] = [1, i * dEnd];
+            this.pinsPos = [start, end];
+        }
+        console.log(this.size);
     }
 
     get x() { return this.pos[0]; }
@@ -149,8 +164,8 @@ class BlockGUI {
     set y(v) { this.pos[1] = v; }
 
     get kind() { return this.block.kind.name; }
+    get hasImg() { return this.img.complete && this.img.naturalWidth > 0 }
 
-    get pinsPos() { return BlockGUI.PINS_POSITION[this.kind]; }
     
     /**
      * @param {number} i 
@@ -158,13 +173,9 @@ class BlockGUI {
      * @returns {Vec2}
      */
     pinAt(i, j) {
-        // console.log(this.kind);
-        // console.log(this.pinsPos);
-        // console.log(i, j);
         const pin = this.pinsPos[i][j];
-        const x = pin[0] * this.size[0] + this.x;
-        const y = pin[1] * this.size[1] + this.y;
-        // console.log(this.pos.x);
+        const x = pin[0] * this.size.x + this.x;
+        const y = pin[1] * this.size.y + this.y;
 
         return new Vec2(x, y);
     }
@@ -172,8 +183,11 @@ class BlockGUI {
     /** @param {CanvasRenderingContext2D} ctx */
     draw(ctx) {
         // TODO: add rotation
-        if (!this.img.complete || this.img.naturalWidth === 0) return;
-        // draw main body
+        if (!this.hasImg) {
+            ctx.strokeRect(this.x, this.y, this.size.x, this.size.y);
+            return 
+        }
+        
         ctx.drawImage(this.img, this.x, this.y, ...this.size);
     }
 
@@ -189,7 +203,7 @@ class BlockGUI {
         if (lx < 0 || ly < 0 || lx >= w || ly >= h) return false;
 
         const mask = HitMaskCache.get(this.img, w, h);
-        return mask === null ? true : mask[ly * w + lx] === 1; // no mask: bounding box
+        return mask === null ? true : mask[ly * w + lx] === 1;
     }
 
 
@@ -272,16 +286,11 @@ class WireGUI {
      */
     draw(ctx) {
         if (!this.source) return
-        if (this.source.kind == "source") return
+
         this.#path = new Path2D();
-        // console.log(this);
         const startPos = this.source[0].pinAt(1, this.source[1]);
         const destPos = this.destination[0].pinAt(0, this.destination[1]);
-        // console.log(startPos);
-        // console.log(destPos);
-        const mid = (startPos + destPos) * 0.5;
         this.#path.moveTo(...startPos);
-        // this.#path.bezierCurveTo(mid.x, mid.y, mid.x, mid.y, destPos.x, destPos.y);
         this.#path.lineTo(...destPos);
         ctx.stroke(this.#path);
     }
@@ -353,7 +362,7 @@ class CircuitGUI {
         this.posScale = 1.0;
 
         this.hovered = null;
-        this.selecteds = new Array();
+        this.selecteds = [];
         this.captured = null;
         this.isDragging = false;
         this.isSelecting = false;
@@ -366,8 +375,8 @@ class CircuitGUI {
         this.acc = 0;
         this.rafId = 0;
 
-        this.wires = new Array();
-        this.blocks = blocks ?? new Array();
+        this.wires = [];
+        this.blocks = blocks ?? [];
         this.circuit = circuit;
         // if (!blocks) for (const block of this.circuit.blocks) this.addBlockGUI(new BlockGUI(block));
 
