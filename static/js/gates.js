@@ -31,8 +31,8 @@ class Source extends Block {
         this.outputs[0].value = value;
     }
 
-    evaluate() {
-        return false;
+    compute() {
+        return [this.value];
     }
 
     toJSON() {
@@ -65,17 +65,23 @@ class Clock extends Block {
         this.name = name;
         this.f = f;
         this.count = initial_count;
+        this.outputs[0].value = false;
     }
 
-    evaluate() {
-        if (this.count == 0) return true;
-        if (this.count == f) {
-            this.count = 0;
+    compute() {
+        if (this.count == 0) {
+            this.count++; 
             this.outputs[0].value = true;
-            return true;
+            return [true];
         }
+        if (this.count == this.f) {
+            this.count = 0;
+            this.outputs[0].value = false;
+            return [false];
+        }
+        this.count++;
         this.outputs[0].value = false;
-        return false;
+        return [false];
     }
 
     toJSON() {

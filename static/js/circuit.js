@@ -138,7 +138,7 @@ class Block {
         const next = this.func(...vals);
 
         const pipe = this.#pipe;
-        if (pipe.length === 0) return next; // delay == 1 -> pas de file
+        if (pipe.length === 0) return next
 
         const out = pipe[this.#head];
         pipe[this.#head] = next;
@@ -179,14 +179,11 @@ class Circuit {
      */
     add(block) {
         const ids = this.blocks.filter((b) => b.kind.name == block.kind.name);
-        console.log(ids);
         const idsN = ids.map((b) => Number(b.id.toLowerCase().replace(b.kind.name, '')));
-        console.log(idsN);
         var id = Math.max(...idsN);
         if (id == -Infinity) id = -1;
         
         block.id = block.kind.name + (id + 1);
-        console.log(block.id);
         this.blocks.push(block);
 
         return block;

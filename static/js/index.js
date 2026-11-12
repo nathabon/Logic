@@ -1,6 +1,6 @@
 var c = new Circuit();
 
-var s1 = new Source("s1");
+var s1 = new Clock("s1", 2);
 var s2 = new Source("s2", true);
 
 var _or = new Block(OR, "or");
@@ -35,17 +35,32 @@ async function main() {
     const orG = gui.addBlock(_or);
     const or2G = gui.addBlock(_or2);
 
-    const w = gui.connectGUI(s1G, 0, andG, 0);
+    gui.connectGUI(s1G, 0, andG, 0);
     gui.connectGUI(s2G, 0, andG, 1);
     gui.connectGUI(s1G, 0, orG, 0);
-    gui.connectGUI(s2G, 0, orG, 1);
+    const w = gui.connectGUI(s2G, 0, orG, 1);
     gui.connectGUI(orG, 0, or2G, 0);
     gui.connectGUI(andG, 0, or2G, 1);
 
-    console.log(gui.wires);
-    console.log(gui.blocks);
+    // console.log(gui.wires);
+    // console.log(gui.blocks);
+
+    console.log(w);
+    console.log(s2G);
+    console.log(orG);
 
 
+    console.log("Step");
+    gui.circuit.step();
+    console.log(w);
+    console.log(s2G);
+    console.log(orG);
+
+    console.log("Step");
+    gui.circuit.step();
+    console.log(w);
+    console.log(s2G);
+    console.log(orG);
 
     await SpriteCache.ready();
 

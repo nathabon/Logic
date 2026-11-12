@@ -1,4 +1,7 @@
 /** @typedef {[BlockGUI, number]} PortGUI */
+/** @typedef {[number, number]} {Point} */
+/** @typedef {{tip: Point, attach: Point|null}} {Pin} */
+
 
 //MARK: HitMaskCache
 class HitMaskCache {
@@ -101,24 +104,31 @@ class SpriteCache {
 class BlockGUI {
     /** @type {[number, number]} */
     static DEFAULT_SIZE = [150, 150];
-    /** @type {Map<string, [[number, number][], [number, number][]]>} */
+    /** @type {Record<string, [Pin[], Pin[]]>} */
     static PINS_POSITION = {
-        "source": [[], [[1, 0.5]]],
         "and": [
-            [[0.05, 0.36], [0.05, 0.64]],
-            [[0.95, 0.5]]
+            [{ tip: [0.05, 0.3575], attach: [0.3099, 0.3575] }, { tip: [0.05, 0.6425], attach: [0.3099, 0.6425] }], // In
+            [{ tip: [0.95, 0.5], attach: [0.76999, 0.5] }] // Out
         ],
         "or": [
-            [[0.05, 0.36], [0.05, 0.64]],
-            [[0.95, 0.5]]
+            [{ tip: [0.05, 0.3575], attach: [0.31999, 0.3575] }, { tip: [0.05, 0.6425], attach: [0.31999, 0.6425] }], // In
+            [{ tip: [0.95, 0.5], attach: [0.72001, 0.5] }] // Out
         ],
+    }
+
+    /** @type {Partial<Record<string, (ctx: CanvasRenderingContext2D, gui: BlockGUI) => void>>} */
+    static CUSTOM_DRAW = {
+        'source': (ctx, gui) => {
+            ctx.font = "48px serif";
+            ctx.fillText("Test", gui.x, gui.y);
+        }
     }
 
     /** @type {Block} */
     block;
     /** @type {Vec2} */
     pos;
-    /** @type {[[number, number][], [number, number][]]} */
+    /** @type {[Pin[], Pin[]]} */
     pinsPos;
     /** @type {Vec2} */
     size;
@@ -126,11 +136,13 @@ class BlockGUI {
     rotation;
     /** @type {HTMLImageElement} */
     img;
+    /** @type {((ctx: CanvasRenderingContext2D, gui: BlockGUI) => void) | null} */
+    customDraw;
 
     /**
      * @param {Block} block
      * @param {[number, number]} [pos]
-     * @param {[number, number]} [size] drawn size; differs per sprite if needed
+     * @param {[number, number]} [size]
      * @param {number} rotation
      */
     constructor(block, pos = [0, 0], size = BlockGUI.DEFAULT_SIZE, rotation=0.0) {
@@ -138,24 +150,20 @@ class BlockGUI {
         this.pos = new Vec2(...pos);
         this.size = new Vec2(...size);
         this.rotation = rotation;
-        this.img = SpriteCache.get(
-            `static/images/gates/${block.kind.name}.svg`,
-            this.size[0],
-            this.size[1],
-        );
+        this.img = SpriteCache.get(`static/images/gates/${block.kind.name}_body.svg`, this.size[0], this.size[1]);
         
-        console.log(this.kind, this.img, this.hasImg);
         if (this.hasImg) this.pinsPos = BlockGUI.PINS_POSITION[this.kind];
         else {
             const dStart = 1 / (this.block.n_in + 1);
             const dEnd = 1 / (this.block.n_out + 1);
             const start = new Array(this.block.n_in);
-            for (let i = 1; i < this.block.n_in + 1; i++) start[i-1] = [0, i * dStart];
+            for (let i = 1; i < this.block.n_in + 1; i++) start[i - 1] = {tip: [-0.1, i * dStart], attach: [0, i * dStart]};
             const end = new Array(this.block.n_out);
-            for (let i = 1; i < this.block.n_out + 1; i++) end[i-1] = [1, i * dEnd];
+            for (let i = 1; i < this.block.n_out + 1; i++) end[i - 1] = {tip: [1.1, i * dEnd], attach: [1, i * dEnd]};
             this.pinsPos = [start, end];
         }
-        console.log(this.size);
+
+        this.customDraw = BlockGUI.CUSTOM_DRAW[this.kind];
     }
 
     get x() { return this.pos[0]; }
@@ -164,31 +172,70 @@ class BlockGUI {
     set y(v) { this.pos[1] = v; }
 
     get kind() { return this.block.kind.name; }
-    get hasImg() { return this.img.complete && this.img.naturalWidth > 0 }
+    get hasImg() { return this.img.complete && this.img.naturalWidth > 0; }
 
     
     /**
      * @param {number} i 
      * @param {number} j 
-     * @returns {Vec2}
+     * @returns {Pin}
      */
     pinAt(i, j) {
         const pin = this.pinsPos[i][j];
-        const x = pin[0] * this.size.x + this.x;
-        const y = pin[1] * this.size.y + this.y;
+        const x = pin.tip[0] * this.size.x + this.x;
+        const y = pin.tip[1] * this.size.y + this.y;
 
-        return new Vec2(x, y);
+        if (pin.attach) {
+            const _x = pin.attach[0] * this.size.x + this.x;
+            const _y = pin.attach[1] * this.size.y + this.y;
+
+            return {tip: new Vec2(x, y), attach: new Vec2(_x, _y)};
+        }
+
+        return {tip: new Vec2(x, y), attach: null};
     }
 
     /** @param {CanvasRenderingContext2D} ctx */
     draw(ctx) {
-        // TODO: add rotation
-        if (!this.hasImg) {
-            ctx.strokeRect(this.x, this.y, this.size.x, this.size.y);
-            return 
+        ctx.save();
+
+        /**
+         * @param {Pin} pin 
+         * @param {Wire | null} wire 
+         */
+        function drawPin(pin, wire) {
+            ctx.beginPath();
+            ctx.strokeStyle = (wire?.value) ? "green" : "gray";
+            ctx.moveTo(...pin.attach);
+            ctx.lineTo(...pin.tip);
+            if (!wire || wire.destinations.length == 0) ctx.arc(pin.tip.x, pin.tip.y, 4, 0, Math.PI * 2);
+            ctx.stroke();
         }
         
-        ctx.drawImage(this.img, this.x, this.y, ...this.size);
+        // Pins
+        ctx.lineWidth = 3 * this.size.x / 100;
+        ctx.lineCap = "round";
+        for (let i = 0; i < this.block.n_in; i++) {
+            const pin = this.pinAt(0, i);
+            drawPin(pin, this.block.inputs[i]);
+        }
+        for (let i = 0; i < this.block.n_out; i++) {
+            const pin = this.pinAt(1, i);
+            drawPin(pin, this.block.outputs[i]);
+        }
+        ctx.strokeStyle = "black";
+
+        // Main body
+        ctx.beginPath();
+        if (!this.hasImg) {
+            ctx.strokeRect(this.x, this.y, this.size.x, this.size.y);
+        } else {
+            ctx.drawImage(this.img, this.x, this.y, ...this.size);
+        }
+        
+        // Custom
+        if (this.customDraw) this.customDraw(ctx, this);
+        ctx.restore();
     }
 
     /**
@@ -269,7 +316,7 @@ class WireGUI {
         this.destination = destination
     }
 
-    get value() { this.wire.value }
+    get value() { return this.wire.value; }
 
     /**
      * @param {CanvasRenderingContext2D} ctx
@@ -287,12 +334,19 @@ class WireGUI {
     draw(ctx) {
         if (!this.source) return
 
+        ctx.save();
         this.#path = new Path2D();
         const startPos = this.source[0].pinAt(1, this.source[1]);
         const destPos = this.destination[0].pinAt(0, this.destination[1]);
-        this.#path.moveTo(...startPos);
-        this.#path.lineTo(...destPos);
+        const dx = Math.max((destPos.tip.x - startPos.tip.x) / 2, 10);
+        this.#path.moveTo(...startPos.tip);
+        // this.#path.lineTo(...destPos.tip);
+        this.#path.bezierCurveTo(startPos.tip.x + dx, startPos.tip.y, destPos.tip.x - dx, destPos.tip.y, destPos.tip.x, destPos.tip.y);
+        ctx.lineWidth = 4.5;
+        ctx.lineCap = "round";
+        ctx.strokeStyle = this.value ? "green" : "gray";
         ctx.stroke(this.#path);
+        ctx.restore();
     }
 
     toJSON() {
@@ -378,7 +432,6 @@ class CircuitGUI {
         this.wires = [];
         this.blocks = blocks ?? [];
         this.circuit = circuit;
-        // if (!blocks) for (const block of this.circuit.blocks) this.addBlockGUI(new BlockGUI(block));
 
         this.bindEvents();
     }
@@ -532,7 +585,10 @@ class CircuitGUI {
 
         let ticks = 0;
         while (this.acc >= tickMs && ticks < this.maxTicksPerFrame) {
+            // console.log("Step");
             this.circuit.step();
+            // console.log(this.blocks);
+            // console.log(this.wires);
             this.acc -= tickMs;
             ticks++;
         }
