@@ -1,8 +1,18 @@
 const SOURCE_FALSE = new GateType("source", 0, 1, () => [false]);
 const SOURCE_TRUE = new GateType("source", 0, 1, () => [true]);
+const CLOCK = new GateType('clock', 0, 1, () => [false]);
 const NOT = new GateType("not", 1, 1, (a) => [!a]);
 const AND = new GateType("and", 2, 1, (a, b) => [a && b]);
 const OR = new GateType("or", 2, 1, (a, b) => [a || b]);
+
+/** @type {Record<string, GateType>} */
+const GATES = {
+    'source': SOURCE_FALSE,
+    'clock': CLOCK,
+    'not': NOT,
+    'and': AND,
+    'or': OR
+};
 
 
 // MARK: Source
@@ -43,6 +53,13 @@ class Source extends Block {
             value: this.value
         };
     }
+
+    static fromJSON(data) {
+        const block = new Source(data.name, data.value);
+        block.id = data.id;
+
+        return block;
+    }
 }
 
 
@@ -61,7 +78,7 @@ class Clock extends Block {
      * @param {number} initial_count 
      */
     constructor(name = null, f = 1, initial_count = 0) {
-        super(new GateType("source", 0, 1, null));
+        super(new GateType("clock", 0, 1, null));
         this.name = name;
         this.f = f;
         this.count = initial_count;
@@ -92,5 +109,12 @@ class Clock extends Block {
             f: this.f,
             count: this.count
         };
+    }
+
+    static fromJSON(data) {
+        const block = new Clock(data.name, data.f, data.count);
+        block.id = data.id;
+
+        return block;
     }
 }

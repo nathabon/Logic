@@ -15,10 +15,14 @@
 
     <div>
         <div id="topToolbar">
-
+            <button id="startPauseButton">Pause</button>
+            <button id="stepButton">Step</button>
+            <input type="range" name="" id="speedSelect" min="1" max="60" step="1" value="2"> <p id="speedValue">2</p>
+            <button id="exportButton">Export to JSON</button>
+            <input type="file" id="importButton">Import from JSON</button>
         </div>
 
-        <canvas id="mainCanva" width="500" height="500"></canvas>
+        <canvas id="mainCanva" width="1000" height="1000"></canvas>
     </div>
 
     <script src="static/js/circuit.js"></script>

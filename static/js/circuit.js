@@ -64,14 +64,12 @@ class Wire {
         this.destinations = destination;
     }
 
-    /**
-     * @returns {string}
-     */
+
     toJson() {
-        return JSON.stringify({
+        return {
             'source': [this.source?.[0].id, this.source?.[1]],
             'destinations': this.destinations.map((p) => ([p[0].id, p[1]]))
-        });
+        };
     }
 }
 
@@ -155,6 +153,29 @@ class Block {
             head: this.#head
         };
     }
+
+    /**
+     * @param {{ kind: string | number; name: string | null | undefined; id: string; pipe: Bits[]; head: number; }} data
+     */
+    static fromJSON(data) {
+        /** @type {Block} */
+        
+        switch (data.kind) {
+            case "source":
+                return Source.fromJSON(data);
+            
+            case "clock":
+                return Clock.fromJSON(data);
+        
+            default:
+                const block = new Block(GATES[data.kind], data.name);
+                block.id = data.id;
+                block.#pipe = data.pipe;
+                block.#head = data.head;
+
+                return block;
+        } 
+    }
 }
 
 
@@ -169,7 +190,7 @@ class Circuit {
     /**
      * @param {Block[] | null} blocks 
      */
-    constructor(blocks) {
+    constructor(blocks=null) {
         this.blocks = blocks ?? [];
         this.tick = 0;
     }
@@ -187,6 +208,14 @@ class Circuit {
         this.blocks.push(block);
 
         return block;
+    }
+
+    /**
+     * @param {string} id 
+     * @returns {Block | undefined}
+     */
+    getBlock(id) {
+        return this.blocks.find((b) => (b.id == id));
     }
 
     /**
@@ -237,5 +266,17 @@ class Circuit {
         return {
             blocks: this.blocks.map((b) => b.toJSON())
         };
+    }
+
+    /**
+     * @param {{ blocks: any; }} data
+     */
+    static fromJSON(data) {
+        const c = new Circuit();
+        for (const b of data.blocks) {
+            c.add(/** @type {Block} */ (Block.fromJSON(b)));
+        }
+
+        return c;
     }
 }

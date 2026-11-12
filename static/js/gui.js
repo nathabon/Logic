@@ -360,6 +360,8 @@ class WireGUI {
 // MARK: CircuitGUI
 class CircuitGUI {
 
+    /** @type {string} */
+    name;
     /** @type {HTMLCanvasElement} */
     canvas;
     /** @type {CanvasRenderingContext2D} */
@@ -386,6 +388,8 @@ class CircuitGUI {
     maxTicksPerFrame;
     /** @type {boolean} */
     running;
+    /** @type {boolean} */
+    pause;
 
     /** @type {number} */
     last;
@@ -424,6 +428,7 @@ class CircuitGUI {
         this.tickRate = 2;
         this.maxTicksPerFrame = 60;
         this.running = false;
+        this.pause = true;
 
         this.last = 0;
         this.acc = 0;
@@ -511,11 +516,11 @@ class CircuitGUI {
     }
 
     /**
-     * @param {Block} block 
+     * @param {string} id 
      * @return {BlockGUI}
      */
-    getBlockGUI(block) {
-        return this.blocks.find((b) => (b.block == block));
+    getBlockGUI(id) {
+        return this.blocks.find((b) => (b.block.id == id));
     }
 
     bindEvents() {
@@ -561,19 +566,21 @@ class CircuitGUI {
     start() {
         if (this.running) return;
         this.running = true;
+        this.pause = false;
         this.last = performance.now();
         this.rafId = requestAnimationFrame(this.step);
     }
 
     stop() {
         this.running = false;
+        this.pause = true;
         cancelAnimationFrame(this.rafId);
     }
 
 
     step = (now) => {
         if (!this.running) return;
-        this.update(now);   // simulation
+        if (!this.pause) this.update(now);   // simulation
         this.draw();      // drawing
         requestAnimationFrame(this.step);
     };
@@ -585,10 +592,7 @@ class CircuitGUI {
 
         let ticks = 0;
         while (this.acc >= tickMs && ticks < this.maxTicksPerFrame) {
-            // console.log("Step");
             this.circuit.step();
-            // console.log(this.blocks);
-            // console.log(this.wires);
             this.acc -= tickMs;
             ticks++;
         }
@@ -603,9 +607,21 @@ class CircuitGUI {
 
     toJSON() {
         return {
-            ciruit: this.circuit.toJSON(),
+            version: 1,
+            name: this.name,
+            circuit: this.circuit.toJSON(),
             wires: this.wires.map((w) => w.toJSON()),
             blocks: this.blocks.map((b) => b.toJSON())
         };
+    }
+
+    static fromJSON(canvas, ctx, data) {
+        // TODO: make block with dict for faster search
+        const circuit = Circuit.fromJSON(data.circuit);
+        const gui = new CircuitGUI(canvas, ctx, circuit);
+        for (const b of data.blocks) gui.addBlock(circuit.getBlock(b.block_id), [b.pos.x, b.pos.y]);
+        for (const w of data.wires) gui.connectGUI(gui.getBlockGUI(w.src[0]), w.src[1], gui.getBlockGUI(w.dst[0]), w.dst[1]);
+
+        return gui;
     }
 }
