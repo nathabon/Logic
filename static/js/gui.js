@@ -835,6 +835,7 @@ class CircuitGUI {
         // TODO: make block with dict for faster search
         const circuit = Circuit.fromJSON(data.circuit);
         const gui = new CircuitGUI(canvas, ctx, circuit);
+        gui.name = data.name;
         for (const b of data.blocks) gui.addBlock(circuit.getBlock(b.block_id), [b.pos.x, b.pos.y]);
         for (const w of data.wires) gui.connectGUI(gui.getBlockGUI(w.src[0]), w.src[1], gui.getBlockGUI(w.dst[0]), w.dst[1]);
 
