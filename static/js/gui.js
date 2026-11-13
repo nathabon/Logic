@@ -1,7 +1,12 @@
 /** @typedef {[BlockGUI, number]} PortGUI */
 /** @typedef {[number, number]} {Point} */
 /** @typedef {{tip: Point, attach: Point|null}} {Pin} */
+/** @typedef {BlockGUI | WireGUI} {UIElement} */
 
+function inInterval(n, a, b) {
+    if (a > b) return inInterval(n, b, a);
+    return a <= n && n <= b;
+}
 
 //MARK: HitMaskCache
 class HitMaskCache {
@@ -100,12 +105,57 @@ class SpriteCache {
     }
 }
 
+// MARK: RenderingDrawContext
+class RenderingDrawContext {
+    /** @type {HTMLCanvasElement} */
+    canvas;
+    /** @type {CanvasRenderingContext2D} */
+    ctx;
+    /** @type {Vec2} */
+    posDelta = new Vec2(0, 0);
+    /** @type {number} */
+    posScale = 1;
+    /** @type {UIElement[]} */
+    selecteds;
+    /** @type {UIElement | null} */
+    captured;
+    /** @type {UIElement | null} */
+    hovered = null;
+
+    /**
+     * @param {HTMLCanvasElement} canvas 
+     * @param {CanvasRenderingContext2D} ctx 
+     * @param {Vec2} posDelta 
+     * @param {number} posScale 
+     * @param {UIElement[]} selecteds 
+     * @param {UIElement | null} captured
+     * @param {UIElement | null} hovered 
+     */
+    constructor(canvas, ctx, posDelta, posScale, selecteds, captured, hovered) {
+        this.canvas = canvas;
+        this.ctx = ctx;
+        this.posDelta = posDelta;
+        this.posScale = posScale;
+        this.selecteds = selecteds;
+        this.captured = captured;
+        this.hovered = hovered;
+    }
+}
+
 //MARK: BlockGUI
 class BlockGUI {
     /** @type {[number, number]} */
-    static DEFAULT_SIZE = [150, 150];
+    static DEFAULT_SIZE = [100, 100];
     /** @type {Record<string, [Pin[], Pin[]]>} */
     static PINS_POSITION = {
+        "source": [
+            [],
+            [{ tip: [0.95, 0.5], attach: [0.75, 0.5] }]
+        ],
+        "not": [
+            [{ tip: [0.05, 0.5], attach: [0.3175, 0.5] }], // In
+            [{ tip: [0.95, 0.5], attach: [0.835, 0.5] }] // Out
+        ],
         "and": [
             [{ tip: [0.05, 0.3575], attach: [0.3099, 0.3575] }, { tip: [0.05, 0.6425], attach: [0.3099, 0.6425] }], // In
             [{ tip: [0.95, 0.5], attach: [0.76999, 0.5] }] // Out
@@ -114,13 +164,17 @@ class BlockGUI {
             [{ tip: [0.05, 0.3575], attach: [0.31999, 0.3575] }, { tip: [0.05, 0.6425], attach: [0.31999, 0.6425] }], // In
             [{ tip: [0.95, 0.5], attach: [0.72001, 0.5] }] // Out
         ],
+        "xor": [
+            [{ tip: [0.05, 0.3475], attach: [0.28999, 0.3475] }, { tip: [0.05, 0.6325], attach: [0.28999, 0.6325] }], // In
+            [{ tip: [0.95, 0.5], attach: [0.78125, 0.5] }] // Out
+        ],
     }
 
     /** @type {Partial<Record<string, (ctx: CanvasRenderingContext2D, gui: BlockGUI) => void>>} */
     static CUSTOM_DRAW = {
-        'source': (ctx, gui) => {
-            ctx.font = "48px serif";
-            ctx.fillText("Test", gui.x, gui.y);
+        'source': (rc, block) => {
+            rc.ctx.font = "48px serif";
+            rc.ctx.fillText("Test", block.x, block.y);
         }
     }
 
@@ -150,7 +204,7 @@ class BlockGUI {
         this.pos = new Vec2(...pos);
         this.size = new Vec2(...size);
         this.rotation = rotation;
-        this.img = SpriteCache.get(`static/images/gates/${block.kind.name}_body.svg`, this.size[0], this.size[1]);
+        this.img = SpriteCache.get(`static/images/gates/${block.kind.name}_body.svg`, this.size[0], this.size[1]); // TODO: add EU / US gates
         
         if (this.hasImg) this.pinsPos = BlockGUI.PINS_POSITION[this.kind];
         else {
@@ -170,6 +224,7 @@ class BlockGUI {
     set x(v) { this.pos[0] = v; }
     get y() { return this.pos[1]; }
     set y(v) { this.pos[1] = v; }
+    get center() { return this.pos.add(this.size.scale(0.5)); }
 
     get kind() { return this.block.kind.name; }
     get hasImg() { return this.img.complete && this.img.naturalWidth > 0; }
@@ -178,7 +233,7 @@ class BlockGUI {
     /**
      * @param {number} i 
      * @param {number} j 
-     * @returns {Pin}
+     * @returns {{tip: Vec2, attach: Vec2 | null}}
      */
     pinAt(i, j) {
         const pin = this.pinsPos[i][j];
@@ -195,8 +250,16 @@ class BlockGUI {
         return {tip: new Vec2(x, y), attach: null};
     }
 
-    /** @param {CanvasRenderingContext2D} ctx */
-    draw(ctx) {
+    pinContains(x, y) {
+        const p = new Vec2(x, y);
+        for (let i = 0; i < this.block.n_in; i++) if (this.pinAt(0, i).tip.distanceTo(p) <= 3) return [0, i];
+        for (let i = 0; i < this.block.n_out; i++) if (this.pinAt(1, i).tip.distanceTo(p) <= 3) return [1, i];
+        return null;
+    }
+
+    /** @param {RenderingDrawContext} rc */
+    draw(rc) {
+        const ctx = rc.ctx;
         ctx.save();
 
         /**
@@ -226,15 +289,25 @@ class BlockGUI {
         ctx.strokeStyle = "black";
 
         // Main body
+        if (rc.hovered == this) { // Hovered // TODO: better shadow optimisation
+            ctx.shadowColor = "gray";
+            ctx.shadowBlur = 10 / rc.posScale;
+        }
+        if (rc.captured == this || rc.selecteds.includes(this)) { // Selected
+            ctx.shadowColor = "black";
+            ctx.shadowBlur = 5 / rc.posScale;
+        }
+
         ctx.beginPath();
         if (!this.hasImg) {
             ctx.strokeRect(this.x, this.y, this.size.x, this.size.y);
         } else {
             ctx.drawImage(this.img, this.x, this.y, ...this.size);
         }
+        ctx.shadowBlur = 0;
         
         // Custom
-        if (this.customDraw) this.customDraw(ctx, this);
+        if (this.customDraw) this.customDraw(rc, this);
         ctx.restore();
     }
 
@@ -256,22 +329,28 @@ class BlockGUI {
 
     /**
      * @param {MouseEvent} e 
-     * @param {[number, number]} pos 
+     * @param {Vec2} pos 
      * @param {CircuitGUI} circuit
      * @returns {boolean}
      */
     handleMouseEvent(e, pos, circuit) {
+        const hovered = circuit.hovered == this;
+        const captured = circuit.captured == this;
+        const selected = circuit.selecteds.includes(this);
         switch (e.type) {
             case "mousedown":
-                if (!this.contains(pos[0], pos[1])) return false;
-                circuit.deltaPos = [pos[0] - this.x, pos[1] - this.y];
+                if (!hovered) return false;
+                // circuit.deltaPos = [pos[0] - this.x, pos[1] - this.y];
+                // circuit.deltaPos = 
                 circuit.isDragging = true;
+                if (!selected) circuit.selecteds = [this];
                 return true;
 
             case "mousemove":
                 if (!circuit.isDragging) return false;
-                this.x = pos[0] - circuit.deltaPos[0];
-                this.y = pos[1] - circuit.deltaPos[1];
+                // this.x = pos[0] - circuit.deltaPos[0];
+                // this.y = pos[1] - circuit.deltaPos[1];
+                // this.pos.iadd(circuit.deltaPos);
                 return true;
 
             case "mouseup":
@@ -329,24 +408,60 @@ class WireGUI {
     }
 
     /** 
-     * @param {CanvasRenderingContext2D} ctx 
+     * @param {RenderingDrawContext} rc
      */
-    draw(ctx) {
+    draw(rc) {
         if (!this.source) return
 
+        const ctx = rc.ctx;
         ctx.save();
+
         this.#path = new Path2D();
         const startPos = this.source[0].pinAt(1, this.source[1]);
         const destPos = this.destination[0].pinAt(0, this.destination[1]);
         const dx = Math.max((destPos.tip.x - startPos.tip.x) / 2, 10);
         this.#path.moveTo(...startPos.tip);
-        // this.#path.lineTo(...destPos.tip);
         this.#path.bezierCurveTo(startPos.tip.x + dx, startPos.tip.y, destPos.tip.x - dx, destPos.tip.y, destPos.tip.x, destPos.tip.y);
-        ctx.lineWidth = 4.5;
+
+        // Main body
+        if (rc.hovered == this) { // Hovered // TODO: better shadow optimisation
+            ctx.shadowColor = "gray";
+            ctx.shadowBlur = 5 / rc.posScale;
+        }
+        if (rc.captured == this || rc.selecteds.includes(this)) { // Selected
+            ctx.shadowColor = "black";
+            ctx.shadowBlur = 3 / rc.posScale;
+        }
+        ctx.lineWidth = 3;
         ctx.lineCap = "round";
         ctx.strokeStyle = this.value ? "green" : "gray";
         ctx.stroke(this.#path);
         ctx.restore();
+    }
+
+    /**
+     * @param {MouseEvent} e 
+     * @param {Vec2} pos 
+     * @param {CircuitGUI} circuit
+     * @returns {boolean}
+     */
+    handleMouseEvent(e, pos, circuit) {
+        switch (e.type) {
+            case "mousedown":
+                
+                break;
+        
+            case "mousemove":
+
+                break;
+
+            case "mouseup":
+
+                break;
+            default:
+                break;
+        }
+        return false;
     }
 
     toJSON() {
@@ -362,25 +477,31 @@ class CircuitGUI {
 
     /** @type {string} */
     name;
+    /** @type {RenderingDrawContext} */
+    context;
     /** @type {HTMLCanvasElement} */
     canvas;
     /** @type {CanvasRenderingContext2D} */
     ctx;
-    /** @type {[number, number]} */
+    /** @type {Vec2} */
     posDelta;
     /** @type {number} */
     posScale;
 
-    /** @type {BlockGUI | null} */
-    hovered;
-    /** @type {BlockGUI[]} */
+    /** @type {UIElement[]} */
     selecteds;
-    /** @type {BlockGUI | null} */
+    /** @type {UIElement | null} */
     captured;
+    /** @type {UIElement | null} */
+    hovered;
     /** @type {boolean} */
     isDragging;
     /** @type {boolean} */
     isSelecting;
+    /** @type {Vec2} */
+    firstMousePos;
+    /** @type {Vec2} */
+    lastMousePos;
 
     /** @type {number} */
     tickRate;
@@ -420,10 +541,15 @@ class CircuitGUI {
         this.posScale = 1.0;
 
         this.hovered = null;
-        this.selecteds = [];
         this.captured = null;
+        this.selecteds = [];
         this.isDragging = false;
         this.isSelecting = false;
+
+        this.lastMousePos = new Vec2(0, 0);
+        this.firstMousePos = new Vec2(0, 0);
+
+        this.context = new RenderingDrawContext(this.canvas, this.ctx, this.posDelta, this.posScale, this.selecteds, this.captured, this.hovered);
 
         this.tickRate = 2;
         this.maxTicksPerFrame = 60;
@@ -440,6 +566,8 @@ class CircuitGUI {
 
         this.bindEvents();
     }
+
+    get center() { return this.posDelta.add(new Vec2(this.canvas.width, this.canvas.height)); }
 
     /**
      * @param {MouseEvent} e 
@@ -497,6 +625,17 @@ class CircuitGUI {
     }
 
     /**
+     * @param {string} name 
+     * @param {[number, number]} pos 
+     * @returns {BlockGUI}
+     */
+    addGate(name, pos = [0, 0]) {
+        const block = new Block(GATES[name]);
+        this.circuit.add(block);
+        return this.addBlock(block, pos);
+    }
+
+    /**
      * @param {Block} block 
      * @param {[number, number]} pos 
      * @returns {BlockGUI}
@@ -527,7 +666,7 @@ class CircuitGUI {
         this.canvas.addEventListener("mousedown", (e) => this.handleMouseEvent(e));
         window.addEventListener("mousemove", (e) => this.handleMouseEvent(e));
         window.addEventListener("mouseup", (e) => this.handleMouseEvent(e));
-        this.canvas.addEventListener("wheel", (e) => this.onWheel(e), { passive: false });
+        // this.canvas.addEventListener("wheel", (e) => this.onWheel(e), { passive: false });
     }
 
     /**
@@ -535,32 +674,100 @@ class CircuitGUI {
      * @param {[number, number]} pos 
      */
     handleBackground(e, pos) {
+        // this.lastMousePos = new Vec2(...pos);
+        switch (e.type) {
+            case "mousedown":
+                // this.firstMousePos = new Vec2(...pos);
+                this.isSelecting = true;
+                break;
+        
+            case "mousemove":
+                if (!this.isSelecting) break;
 
+                this.selecteds = [];
+                for (const block of this.blocks) if (inInterval(block.center.x, this.firstMousePos.x, this.lastMousePos.x) && inInterval(block.center.y, this.firstMousePos.y, this.lastMousePos.y)) this.selecteds.push(block);
+                break;
+
+            case "mouseup":
+                this.isSelecting = false;
+                if (this.firstMousePos.equals(this.lastMousePos)) this.selecteds = [];
+                break;
+
+            default:
+                break;
+        }
+        
     }
 
     /** @param {MouseEvent} e */
     handleMouseEvent(e) {
-        const pos = this.getAbsolutePos(e);
+        const pos = new Vec2(...this.getAbsolutePos(e));
+
+        if (e.type == "mousedown") this.firstMousePos = pos.clone();
+        if (e.type == "mousemove") this.deltaPos = pos.sub(this.lastMousePos);
+        // if (e.type == "mouseup") this.firstMousePos = pos.clone();
+        this.lastMousePos = pos.clone();
 
         if (this.captured) {
-            this.captured.handleMouseEvent(e, pos, this);
+            const events = this.selecteds.map((b) => (b.handleMouseEvent(e, pos, this)));
+            if (events.some((e) => (e))) { // if any block is dragged
+                if (this.isDragging) {
+                    for (const block of this.selecteds) {
+                        block.pos.iadd(this.deltaPos);
+                    }
+                }
+                
+            } else { // the block is not part of selecteds
+                this.selecteds = [this.captured];
+                this.captured.handleMouseEvent(e, pos, this);
+            }
+            
             if (e.type === "mouseup") this.captured = null;
+            this.context.hovered = this.hovered;
+            this.context.captured = this.captured;
+            this.context.selecteds = this.selecteds;
             return;
         }
 
         // top first
+        this.hovered = null;
+        this.context.hovered = null;
+        // Blocks
         for (let i = this.blocks.length - 1; i >= 0; i--) {
             const block = this.blocks[i];
-            if (!block.handleMouseEvent(e, pos, this)) continue;
+            if (block.contains(...pos)) this.hovered = block;
+            this.context.hovered = this.hovered;
+
+            if (!block.handleMouseEvent(e, pos, this) && this.hovered != block) continue;
 
             if (e.type === "mousedown") {
                 this.captured = block;
                 this.blocks.push(...this.blocks.splice(i, 1)); // to front
             }
+            this.context.captured = this.captured;
+            this.context.selecteds = this.selecteds;
+            return;
+        }
+
+        // Wires
+        for (let i = this.wires.length - 1; i >= 0; i--) {
+            const wire = this.wires[i];
+            if (wire.contains(this.ctx, ...pos)) this.hovered = wire;
+            this.context.hovered = this.hovered;
+
+            if (!wire.handleMouseEvent(e, pos, this) && this.hovered != wire) continue;
+
+            if (e.type === "mousedown") {
+                this.captured = wire;
+                this.wires.push(...this.wires.splice(i, 1)); // to front
+            }
+            this.context.captured = this.captured;
+            this.context.selecteds = this.selecteds;
             return;
         }
 
         this.handleBackground(e, pos);
+        this.context.selecteds = this.selecteds;
     }
 
     start() {
@@ -581,7 +788,7 @@ class CircuitGUI {
     step = (now) => {
         if (!this.running) return;
         if (!this.pause) this.update(now);   // simulation
-        this.draw();      // drawing
+        this.draw();                        //  drawing
         requestAnimationFrame(this.step);
     };
 
@@ -601,8 +808,17 @@ class CircuitGUI {
 
     draw() {
         this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
-        for (const wire of this.wires) wire.draw(this.ctx);
-        for (const block of this.blocks) block.draw(this.ctx);
+
+        // draw selection
+        if (this.isSelecting) {
+            ctx.fillStyle = "rgba(195, 228, 247)";
+            ctx.strokeStyle = "blue";
+            const d = this.lastMousePos.sub(this.firstMousePos);
+            this.ctx.fillRect(this.firstMousePos.x, this.firstMousePos.y, d.x, d.y);
+            this.ctx.strokeRect(this.firstMousePos.x, this.firstMousePos.y, d.x, d.y);
+        }
+        for (const wire of this.wires) wire.draw(this.context);
+        for (const block of this.blocks) block.draw(this.context);
     }
 
     toJSON() {

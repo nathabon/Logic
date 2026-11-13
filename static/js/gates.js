@@ -4,6 +4,7 @@ const CLOCK = new GateType('clock', 0, 1, () => [false]);
 const NOT = new GateType("not", 1, 1, (a) => [!a]);
 const AND = new GateType("and", 2, 1, (a, b) => [a && b]);
 const OR = new GateType("or", 2, 1, (a, b) => [a || b]);
+const XOR = new GateType("xor", 2, 1, (a, b) => [a ^ b]);
 
 /** @type {Record<string, GateType>} */
 const GATES = {
@@ -11,7 +12,8 @@ const GATES = {
     'clock': CLOCK,
     'not': NOT,
     'and': AND,
-    'or': OR
+    'or': OR,
+    'xor': XOR
 };
 
 

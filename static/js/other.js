@@ -19,6 +19,7 @@ class Vec2 {
 
     clone() { return new Vec2(this.x, this.y); }
     add(v) { return new Vec2(this.x + v.x, this.y + v.y); }
+    iadd(v) { this.x += v.x; this.y += v.y; }
     sub(v) { return new Vec2(this.x - v.x, this.y - v.y); }
     scale(k) { return new Vec2(this.x * k, this.y * k); }
     dot(v) { return this.x * v.x + this.y * v.y; }
