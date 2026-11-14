@@ -252,8 +252,8 @@ class BlockGUI {
 
     pinContains(x, y) {
         const p = new Vec2(x, y);
-        for (let i = 0; i < this.block.n_in; i++) if (this.pinAt(0, i).tip.distanceTo(p) <= 3) return [0, i];
-        for (let i = 0; i < this.block.n_out; i++) if (this.pinAt(1, i).tip.distanceTo(p) <= 3) return [1, i];
+        for (let i = 0; i < this.block.n_in; i++) if (this.pinAt(0, i).tip.distanceTo(p) <= 10 && !this.block.inputs[i]) return [0, i];
+        for (let i = 0; i < this.block.n_out; i++) if (this.pinAt(1, i).tip.distanceTo(p) <= 10) return [1, i];
         return null;
     }
 
@@ -265,13 +265,14 @@ class BlockGUI {
         /**
          * @param {Pin} pin 
          * @param {Wire | null} wire 
+         * @param {number} i
          */
-        function drawPin(pin, wire) {
+        function drawPin(pin, wire, i) {
             ctx.beginPath();
             ctx.strokeStyle = (wire?.value) ? "green" : "gray";
             ctx.moveTo(...pin.attach);
             ctx.lineTo(...pin.tip);
-            if (!wire || wire.destinations.length == 0) ctx.arc(pin.tip.x, pin.tip.y, 4, 0, Math.PI * 2);
+            if (i || !wire) ctx.arc(pin.tip.x, pin.tip.y, 4, 0, Math.PI * 2);
             ctx.stroke();
         }
         
@@ -280,11 +281,11 @@ class BlockGUI {
         ctx.lineCap = "round";
         for (let i = 0; i < this.block.n_in; i++) {
             const pin = this.pinAt(0, i);
-            drawPin(pin, this.block.inputs[i]);
+            drawPin(pin, this.block.inputs[i], 0);
         }
         for (let i = 0; i < this.block.n_out; i++) {
             const pin = this.pinAt(1, i);
-            drawPin(pin, this.block.outputs[i]);
+            drawPin(pin, this.block.outputs[i], 1);
         }
         ctx.strokeStyle = "black";
 
@@ -339,21 +340,63 @@ class BlockGUI {
         const selected = circuit.selecteds.includes(this);
         switch (e.type) {
             case "mousedown":
+                const pin = this.pinContains(...pos);
+                if (pin) {
+                    
+                    const [p, i] = pin;
+                    circuit.isWiring = true;
+                    const b = new BlockGUI(this.block, pos, [0, 0]) // doesn't matter, only placehover // TODO: change to invisible block
+                    const wire = p ? this.block.outputs[i] : new Wire(false, null, [this.block, i]);
+                    const wireGui = p ? new WireGUI(wire, [this, i], [b, 0]) : new WireGUI(wire, [b, 0], [this, i]);
+                    circuit.draggingWire = wireGui;
+                    circuit.wirePort = [this, p, i];
+
+                    return true;
+                }
+
                 if (!hovered) return false;
-                // circuit.deltaPos = [pos[0] - this.x, pos[1] - this.y];
-                // circuit.deltaPos = 
                 circuit.isDragging = true;
                 if (!selected) circuit.selecteds = [this];
                 return true;
 
             case "mousemove":
                 if (!circuit.isDragging) return false;
-                // this.x = pos[0] - circuit.deltaPos[0];
-                // this.y = pos[1] - circuit.deltaPos[1];
-                // this.pos.iadd(circuit.deltaPos);
                 return true;
 
             case "mouseup":
+                if (circuit.isWiring) {
+                    const pin = this.pinContains(...pos);
+                    if (pin) {
+                        const [p, i] = pin;
+                        const [_b, _p, _i] = circuit.wirePort;
+
+                        if (p != _p) { // connect both
+                            var src;
+                            var src_port;
+                            var dst;
+                            var dst_port;
+                            if (!_p) { // the wire is from output
+                                src = this;
+                                src_port = i;
+                                dst = _b;
+                                dst_port = _i;
+                            } else {
+                                src = _b;
+                                src_port = _i;
+                                dst = this;
+                                dst_port = i;
+                            }
+                            circuit.connectGUI(src, src_port, dst, dst_port);
+                            circuit.isWiring = false;
+                            circuit.wirePort = null;
+                            circuit.draggingWire = null;
+
+                            return true;
+                        }
+                    }
+                }
+
+
                 if (!circuit.isDragging) return false;
                 circuit.isDragging = false;
                 return true;
@@ -392,9 +435,13 @@ class WireGUI {
         this.#path = new Path2D();
         this.wire = wire;
         this.source = source;
-        this.destination = destination
+        this.destination = destination;
     }
 
+    get src() { return this.source[0]; }
+    get src_port() { return this.source[1]; }
+    get dst() { return this.destination[0]; }
+    get dst_port() { return this.destination[1]; }
     get value() { return this.wire.value; }
 
     /**
@@ -498,6 +545,12 @@ class CircuitGUI {
     isDragging;
     /** @type {boolean} */
     isSelecting;
+    /** @type {boolean} */
+    isWiring;
+    /** @type {WireGUI | null} */
+    draggingWire;
+    /** @type {[BlockGUI, number, number] | null} */
+    wirePort;
     /** @type {Vec2} */
     firstMousePos;
     /** @type {Vec2} */
@@ -545,6 +598,10 @@ class CircuitGUI {
         this.selecteds = [];
         this.isDragging = false;
         this.isSelecting = false;
+
+        this.isWiring = false;
+        this.draggingWire = null;
+        this.wirePort = null;
 
         this.lastMousePos = new Vec2(0, 0);
         this.firstMousePos = new Vec2(0, 0);
@@ -671,17 +728,21 @@ class CircuitGUI {
 
     /**
      * @param {MouseEvent} e 
-     * @param {[number, number]} pos 
+     * @param {Vec2} pos 
      */
     handleBackground(e, pos) {
-        // this.lastMousePos = new Vec2(...pos);
         switch (e.type) {
             case "mousedown":
-                // this.firstMousePos = new Vec2(...pos);
                 this.isSelecting = true;
                 break;
         
             case "mousemove":
+                if (this.isWiring) {    
+                    const b = this.wirePort[1] ? this.draggingWire.dst : this.draggingWire.src;
+                    b.pos = pos;
+                    break;
+                }
+
                 if (!this.isSelecting) break;
 
                 this.selecteds = [];
@@ -691,6 +752,9 @@ class CircuitGUI {
             case "mouseup":
                 this.isSelecting = false;
                 if (this.firstMousePos.equals(this.lastMousePos)) this.selecteds = [];
+                this.isWiring = false;
+                this.wirePort = null;
+                this.draggingWire = null;
                 break;
 
             default:
@@ -705,7 +769,6 @@ class CircuitGUI {
 
         if (e.type == "mousedown") this.firstMousePos = pos.clone();
         if (e.type == "mousemove") this.deltaPos = pos.sub(this.lastMousePos);
-        // if (e.type == "mouseup") this.firstMousePos = pos.clone();
         this.lastMousePos = pos.clone();
 
         if (this.captured) {
@@ -715,18 +778,20 @@ class CircuitGUI {
                     for (const block of this.selecteds) {
                         block.pos.iadd(this.deltaPos);
                     }
+                    return
                 }
                 
-            } else { // the block is not part of selecteds
-                this.selecteds = [this.captured];
-                this.captured.handleMouseEvent(e, pos, this);
-            }
+            } 
+            // else { // the block is not part of selecteds
+            //     this.selecteds = [this.captured];
+            //     this.captured.handleMouseEvent(e, pos, this);
+            // }
             
             if (e.type === "mouseup") this.captured = null;
             this.context.hovered = this.hovered;
             this.context.captured = this.captured;
             this.context.selecteds = this.selecteds;
-            return;
+            // return;
         }
 
         // top first
@@ -819,6 +884,7 @@ class CircuitGUI {
         }
         for (const wire of this.wires) wire.draw(this.context);
         for (const block of this.blocks) block.draw(this.context);
+        if (this.isWiring) this.draggingWire.draw(this.context);
     }
 
     toJSON() {

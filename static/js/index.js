@@ -98,7 +98,7 @@ async function _loadCircuit(name) {
     const cJSON = window.localStorage.getItem('circuit_'+name);
     if (!cJSON) {
         alert('This circuit does not exist.');
-        return;
+        return false;
     }
 
     try {
@@ -107,9 +107,11 @@ async function _loadCircuit(name) {
     } catch (error) {
         alert("An error occured while opening the file : " + error);
         console.error(error);
+        return false;
     }
     
     await startCircuit();
+    return true;
 }
 
 async function loadCircuit() {
@@ -139,7 +141,7 @@ function saveCircuit() {
 
 function _deleteCircuit(name) {
     const names = getCircuits();
-    const newNames = names.filter((n) => (n != 'circuit_'+name));
+    const newNames = names.filter((n) => (n != name));
     window.localStorage.setItem('circuits', JSON.stringify(newNames));
     window.localStorage.removeItem('circuit_'+name);
     newCircuit();
@@ -157,8 +159,11 @@ function newCircuit() {
 
 function getLastCircuit() {
     const lastName = window.localStorage.getItem('last_circuit');
-    if (!lastName) return;
-    _loadCircuit(lastName);
+    if (!lastName || lastName == '') return;
+    if (!_loadCircuit(lastName)) { // last circuit is not here
+        window.localStorage.setItem('last_circuit', ''); 
+        _deleteCircuit(lastName);
+    }
 }
 
 

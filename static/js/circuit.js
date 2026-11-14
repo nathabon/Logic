@@ -97,6 +97,7 @@ class Block {
      * @param {string | null} name 
      */
     constructor(kind, name = null) {
+        this.id = kind.name;
         this.kind = kind;
         this.name = name ?? kind.name;
 
