@@ -1,9 +1,14 @@
 {
   "compilerOptions": {
-    "checkJs": true,
-    "strict": true,
     "target": "ES2022",
-    "noEmit": true
+    "lib": [
+      "ES2022",
+      "DOM",
+      "DOM.Iterable"
+    ],
+    "checkJs": true
   },
-  "include": ["src"]
+  "include": [
+    "static/js/**/*"
+  ]
 }

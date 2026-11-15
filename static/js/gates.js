@@ -1,10 +1,11 @@
 const SOURCE_FALSE = new GateType("source", 0, 1, () => [false]);
 const SOURCE_TRUE = new GateType("source", 0, 1, () => [true]);
+const DELAY = new GateType("delay", 1, 1, (a) => [a]);
 const CLOCK = new GateType('clock', 0, 1, () => [false]);
 const NOT = new GateType("not", 1, 1, (a) => [!a]);
 const AND = new GateType("and", 2, 1, (a, b) => [a && b]);
 const OR = new GateType("or", 2, 1, (a, b) => [a || b]);
-const XOR = new GateType("xor", 2, 1, (a, b) => [a ^ b]);
+const XOR = new GateType("xor", 2, 1, (a, b) => [a != b]);
 
 /** @type {Record<string, GateType>} */
 const GATES = {
@@ -47,6 +48,7 @@ class Source extends Block {
         return [this.value];
     }
 
+    // @ts-ignore
     toJSON() {
         return {
             id: this.id,
@@ -56,6 +58,7 @@ class Source extends Block {
         };
     }
 
+    // @ts-ignore
     static fromJSON(data) {
         const block = new Source(data.name, data.value);
         block.id = data.id;
@@ -75,13 +78,13 @@ class Clock extends Block {
 
     /**
      * 
-     * @param {string} name 
+     * @param {string | null} name 
      * @param {number} f 
      * @param {number} initial_count 
      */
     constructor(name = null, f = 1, initial_count = 0) {
-        super(new GateType("clock", 0, 1, null));
-        this.name = name;
+        super(new GateType("clock", 0, 1, (a) => [a]));
+        this.name = name ?? this.kind.name;
         this.f = f;
         this.count = initial_count;
         this.outputs[0].value = false;
@@ -103,6 +106,7 @@ class Clock extends Block {
         return [false];
     }
 
+    // @ts-ignore
     toJSON() {
         return {
             id: this.id,
@@ -113,6 +117,7 @@ class Clock extends Block {
         };
     }
 
+    // @ts-ignore
     static fromJSON(data) {
         const block = new Clock(data.name, data.f, data.count);
         block.id = data.id;

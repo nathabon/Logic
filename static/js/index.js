@@ -1,3 +1,4 @@
+// @ts-nocheck
 // MARK: Canvas
 /** @type {HTMLCanvasElement} */
 var canva;
@@ -17,6 +18,7 @@ function bindCanvas() {
     ctx = canva.getContext("2d");
 
     c = new Circuit();
+    if (gui) gui.stop();
     gui = new CircuitGUI(canva, ctx, c);
 }
 
@@ -68,7 +70,7 @@ function step() {
 
 function speedRangeSelect(e) {
     const value = speedRange.value;
-    gui.tickRate = value;
+    gui.tickRate = Number(value);
     speedValue.innerText = value;
 }
 
@@ -95,21 +97,20 @@ function listCircuits() {
 }
 
 async function _loadCircuit(name) {
-    const cJSON = window.localStorage.getItem('circuit_'+name);
-    if (!cJSON) {
-        alert('This circuit does not exist.');
-        return false;
-    }
+    const cJSON = window.localStorage.getItem('circuit_' + name);
+    if (!cJSON) return false;
 
+    let next;
     try {
-        const data = JSON.parse(cJSON);
-        gui = CircuitGUI.fromJSON(canva, ctx, data);
+        next = CircuitGUI.fromJSON(canva, ctx, JSON.parse(cJSON));
     } catch (error) {
         alert("An error occured while opening the file : " + error);
         console.error(error);
-        return false;
+        return true;
     }
-    
+
+    if (gui) gui.stop();
+    gui = next;
     await startCircuit();
     return true;
 }
@@ -121,11 +122,7 @@ async function loadCircuit() {
 
 function _saveCircuit(name) {
     var names = getCircuits();
-    if (names.includes(name)) {
-        alert("This name is already used. Please use another");
-        return;
-    }
-    names.push(name);
+    if (!names.includes(name)) names.push(name);
     window.localStorage.setItem('circuits', JSON.stringify(names));
     gui.name = name;
     const cJSON = JSON.stringify(gui.toJSON());
@@ -139,30 +136,32 @@ function saveCircuit() {
     _saveCircuit(name);
 }
 
-function _deleteCircuit(name) {
+async function _deleteCircuit(name) {
     const names = getCircuits();
     const newNames = names.filter((n) => (n != name));
     window.localStorage.setItem('circuits', JSON.stringify(newNames));
     window.localStorage.removeItem('circuit_'+name);
-    newCircuit();
+    if (window.localStorage.getItem('last_circuit') == name) window.localStorage.setItem('last_circuit', '');
+    await newCircuit();
     listCircuits();
 }
 
-function deleteCircuit() {
-    _deleteCircuit(gui.name);
+async function deleteCircuit() {
+    await _deleteCircuit(gui.name);
 }
 
-function newCircuit() {
+async function newCircuit() {
     bindCanvas();
-    startCircuit();
+    await startCircuit();
 }
 
-function getLastCircuit() {
+async function getLastCircuit() {
     const lastName = window.localStorage.getItem('last_circuit');
     if (!lastName || lastName == '') return;
-    if (!_loadCircuit(lastName)) { // last circuit is not here
+    const could = await _loadCircuit(lastName);
+    if (!could) { // last circuit is not here
         window.localStorage.setItem('last_circuit', ''); 
-        _deleteCircuit(lastName);
+        await _deleteCircuit(lastName);
     }
 }
 
@@ -198,14 +197,21 @@ function importJSON(event) {
     // Read the file
     const reader = new FileReader();
     reader.onload = async () => {
+        let next;
         try {
             const data = JSON.parse(reader.result);
-            gui = CircuitGUI.fromJSON(canva, ctx, data);
+            next = CircuitGUI.fromJSON(canva, ctx, data);
         } catch (error) {
             alert("An error occured while opening the file : " + error);
             console.error(error);
+            return true;
         }
+
+        if (gui) gui.stop();
+        gui = next;
         await startCircuit();
+        return true;
+        
     };
     reader.onerror = () => {
         alert("Error reading the file. Please try again.");
@@ -242,9 +248,9 @@ async function startCircuit() {
 async function main() {
     bindCanvas();
     bindLeftToolbar();
-    await bindTopToolbar();
+    bindTopToolbar();
 
     await startCircuit();
 
-    getLastCircuit();
+    await getLastCircuit();
 }

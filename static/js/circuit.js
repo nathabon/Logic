@@ -155,9 +155,8 @@ class Block {
         };
     }
 
-    /**
-     * @param {{ kind: string | number; name: string | null | undefined; id: string; pipe: Bits[]; head: number; }} data
-     */
+
+    // @ts-ignore
     static fromJSON(data) {
         /** @type {Block} */
         
@@ -199,13 +198,22 @@ class Circuit {
     /**
      * @param {Block} block 
      */
-    add(block) {
+    asignID(block) {
         const ids = this.blocks.filter((b) => b.kind.name == block.kind.name);
         const idsN = ids.map((b) => Number(b.id.toLowerCase().replace(b.kind.name, '')));
         var id = Math.max(...idsN);
         if (id == -Infinity) id = -1;
-        
+
         block.id = block.kind.name + (id + 1);
+
+        return block.id;
+    }
+
+    /**
+     * @param {Block} block 
+     */
+    add(block) {
+        if (block.id == '') this.asignID(block);
         this.blocks.push(block);
 
         return block;
@@ -213,9 +221,10 @@ class Circuit {
 
     /**
      * @param {string} id 
-     * @returns {Block | undefined}
+     * @returns {Block}
      */
     getBlock(id) {
+        // @ts-ignore
         return this.blocks.find((b) => (b.id == id));
     }
 
